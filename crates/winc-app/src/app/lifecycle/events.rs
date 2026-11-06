@@ -301,6 +301,7 @@ impl App {
     /// 提示框在窗口里画出时，选中按钮的事件也直接交给这里。
     pub(in crate::app) fn handle_event(&mut self, event: UserEvent) {
         match event {
+            UserEvent::SymbolsReady => {}
             UserEvent::Picked(kind, path) => self.on_picked(kind, path),
             #[cfg(all(unix, not(target_os = "macos")))]
             UserEvent::PickFailed(kind, error) => self.pick_failed(kind, error.as_deref()),

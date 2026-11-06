@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod outline;
 pub(super) mod panel;
 pub(super) mod sidebar;
 pub(super) mod start;

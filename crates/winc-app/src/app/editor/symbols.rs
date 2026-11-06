@@ -3,8 +3,9 @@
 //! 在快速打开的卡片中列出当前文件的函数、类型、标题等符号，输入内容可筛选。上下移动选中项时，
 //! 编辑区预览滚动到该符号；回车跳转到该符号，`Esc` 恢复打开前的滚动位置。
 
+use crate::symbol_jobs::Key;
 use winc_editor::DocumentId;
-use winc_editor::symbols::{self, Symbol};
+use winc_editor::symbols::{Symbol, SymbolIndex};
 use winc_i18n::t;
 
 use super::*;
@@ -14,7 +15,7 @@ pub struct SymbolList {
     /// 符号所属的文档。
     id: DocumentId,
     /// 提取到的符号，按在文件中出现的顺序排列。
-    pub items: Vec<Symbol>,
+    pub items: Arc<SymbolIndex>,
     /// 文档是否为大文件（全文没有读入内存）；为真时不提取符号，`items` 为空。
     pub too_large: bool,
     /// 打开列表时编辑区的滚动位置：首行（行，从 0 起）和横向偏移（逻辑像素）。
@@ -23,7 +24,89 @@ pub struct SymbolList {
     scroll: (f32, f32),
 }
 
+/// 当前活动窗口共享一份索引；后台窗口释放引用并暂停显示。
+#[derive(Default)]
+pub(crate) struct SymbolState {
+    pub key: Option<Key>,
+    pub index: Option<Arc<SymbolIndex>>,
+    pub due: Option<Instant>,
+    pub waiting: bool,
+    pub paused: bool,
+    pub error: bool,
+    pub scroll: f32,
+    pub collapsed: HashSet<usize>,
+    pub visible: Vec<usize>,
+    pub hits: Vec<(Rect, (usize, bool))>,
+}
+
+impl SymbolState {
+    pub fn rebuild_rows(&mut self) {
+        self.hits.clear();
+        self.visible.clear();
+        let Some(index) = &self.index else {
+            return;
+        };
+        let mut hidden_depth = None;
+        for (i, symbol) in index.iter().enumerate() {
+            if hidden_depth.is_some_and(|depth| symbol.depth > depth) {
+                continue;
+            }
+            hidden_depth = self.collapsed.contains(&i).then_some(symbol.depth);
+            self.visible.push(i);
+        }
+    }
+}
+
 impl App {
+    /// 当前显示文本的索引身份；非文本标签不生成大纲。
+    pub(crate) fn symbol_key(&self) -> Option<Key> {
+        if !self.active_shows_text() {
+            return None;
+        }
+        let doc = self.editor.active()?;
+        Some(Key {
+            doc: doc.id,
+            revision: doc.revision,
+            language: doc.highlighter.language().id,
+        })
+    }
+
+    /// 大纲和符号选择器共用一个消费者身份。
+    pub(crate) fn wants_symbols(&self) -> bool {
+        (self.panel_visible && self.sidebar_view == SidebarView::Outline)
+            || (self.picker_open && self.picker_lists_symbols())
+    }
+
+    /// 展示大纲，沿用编辑区键盘焦点。
+    pub(in crate::app) fn show_outline(&mut self) {
+        if self.symbols.error {
+            self.symbols.key = None;
+        }
+        self.set_sidebar_view(SidebarView::Outline);
+        if !self.panel_visible {
+            self.set_sidebar(true);
+        }
+        self.focus = Focus::Editor;
+        self.request_redraw();
+    }
+
+    /// 大纲行点击；过期结果不能用于跳转。
+    pub(in crate::app) fn click_outline(&mut self, item: usize, fold: bool) {
+        if self.symbols.key != self.symbol_key() || self.symbols.waiting {
+            return;
+        }
+        if fold {
+            if !self.symbols.collapsed.remove(&item) {
+                self.symbols.collapsed.insert(item);
+            }
+            self.symbols.rebuild_rows();
+        } else if let Some(symbol) = self.symbols.index.as_ref().and_then(|s| s.get(item)) {
+            let (line, col) = (symbol.line, symbol.col);
+            self.jump_to(line, col, 0);
+            self.focus = Focus::Editor;
+        }
+        self.request_redraw();
+    }
     /// 打开符号列表（`⇧⌘O`）：在快速打开的卡片中列出当前文档的符号，不需要先打开目录。
     ///
     /// 没有打开的文档，或当前标签不显示文本时，在状态栏提示并返回。
@@ -59,21 +142,27 @@ impl App {
     ///
     /// 查询为空时保持符号在文件中的顺序，并选中光标所在的符号；
     /// 否则按名字的匹配度（见 [`input::palette::rate`]）排序，匹配度相同时保持文件中的顺序。
-    pub(in crate::app) fn symbols_refresh(&mut self) {
+    pub(crate) fn symbols_refresh(&mut self) {
         let Some(doc) = self.editor.active() else {
             self.picker_symbols = None;
             self.picker_hits.clear();
             return;
         };
-        if self.picker_symbols.as_ref().is_none_or(|l| l.id != doc.id) {
-            let items = doc.text().rope().map_or_else(Vec::new, |rope| {
-                symbols::symbols(rope, doc.highlighter.language())
-            });
+        {
+            let items = self.symbols.index.clone().unwrap_or_default();
+            let scroll = self
+                .picker_symbols
+                .as_ref()
+                .filter(|l| l.id == doc.id)
+                .map_or((doc.scroll_line, doc.scroll_x), |l| l.scroll);
             self.picker_symbols = Some(SymbolList {
                 id: doc.id,
                 items,
-                too_large: doc.is_large(),
-                scroll: (doc.scroll_line, doc.scroll_x),
+                too_large: doc
+                    .text()
+                    .rope()
+                    .is_none_or(|r| r.len_bytes() > winc_editor::symbols::INDEX_INPUT_BYTES),
+                scroll,
             });
         }
         let Some(list) = &self.picker_symbols else {
@@ -124,6 +213,9 @@ impl App {
     }
 
     fn selected_symbol(&self) -> Option<&Symbol> {
+        if self.symbols.key != self.symbol_key() || self.symbols.waiting {
+            return None;
+        }
         let list = self.picker_symbols.as_ref()?;
         list.items.get(*self.picker_hits.get(self.picker_selected)?)
     }
@@ -136,7 +228,7 @@ impl App {
         // 先清空 `picker_symbols`，关闭面板时 `drop_symbols` 就不会再恢复原来的滚动位置。
         self.picker_symbols = None;
         self.close_picker();
-        self.jump_to(symbol.line, symbol.col, symbol.name.chars().count());
+        self.jump_to(symbol.line, symbol.col, symbol.name_chars);
     }
 
     /// 离开 `@` 模式（关闭面板或删除 `@`）时清理符号列表。

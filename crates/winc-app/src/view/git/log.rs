@@ -173,7 +173,7 @@ pub(in crate::view) fn draw_log(app: &mut App, frame: &mut Frame<'_>, index: usi
 fn draw_search(app: &mut App, frame: &mut Frame<'_>, parts: &LogParts) -> Rect {
     let p = app.palette;
     let header = parts.header;
-    let search = Rect::new(header.x + 12.0, header.y + 6.0, 220.0, header.h - 12.0);
+    let search = crate::app::git::log::log_search_rect(header);
     let focused = app.focus == Focus::LogFilter;
     field_box(app, frame, search, p.editor_bg, focused, false);
     icons::magnifier(
@@ -182,7 +182,12 @@ fn draw_search(app: &mut App, frame: &mut Frame<'_>, parts: &LogParts) -> Rect {
         p.text_dim,
         search,
     );
-    let area = Rect::new(search.x + 26.0, search.y, search.w - 32.0, search.h);
+    let area = Rect::new(
+        search.x + 26.0,
+        search.y,
+        (search.w - 32.0).max(0.0),
+        search.h,
+    );
     let placeholder = match keymap::shortcut(Action::Find) {
         Some(key) => t!("git-log-filter-placeholder-key", key = key),
         None => t!("git-log-filter-placeholder").to_owned(),
@@ -220,7 +225,7 @@ fn draw_header(
     // 两个下拉：「分支 全部」「作者 张伟」。
     let branch = query.branch.as_deref().unwrap_or(t!("git-log-filter-all"));
     let author = query.author.as_deref().unwrap_or(t!("git-log-filter-all"));
-    for (target, name, value, on) in [
+    let controls = [
         (
             LogTarget::Branch,
             t!("git-log-filter-branch"),
@@ -233,12 +238,23 @@ fn draw_header(
             author,
             query.author.is_some(),
         ),
-    ] {
+    ];
+    let widths = controls.map(|(_, name, value, _)| {
+        36.0 + frame.measure(FontKind::Ui, app.fonts.ui_small, name)
+            + frame
+                .measure(FontKind::Ui, app.fonts.ui_small, value)
+                .min(160.0)
+    });
+    let rects = crate::app::git::log::log_filter_rects(header, widths);
+    for ((target, name, value, on), rect) in controls.into_iter().zip(rects) {
+        if rect.w < 20.0 {
+            continue;
+        }
         let name_w = frame.measure(FontKind::Ui, app.fonts.ui_small, name);
         let value_w = frame
             .measure(FontKind::Ui, app.fonts.ui_small, value)
-            .min(160.0);
-        let rect = Rect::new(x, y, 10.0 + name_w + 6.0 + value_w + 20.0, pill_h);
+            .min(160.0)
+            .min((rect.w - name_w - 36.0).max(0.0));
         let hovered = app.hover == Hover::Log(target);
         if on {
             frame.rounded(rect, p.accent.alpha(p.accent.a * 0.14), RADIUS_ROW);
@@ -266,10 +282,11 @@ fn draw_header(
             .to_string_lossy()
             .into_owned();
         let text = t!("git-log-filter-file", path = shown);
-        let w = frame
+        let w = (frame
             .measure(FontKind::Ui, app.fonts.ui_small, &text)
             .min(320.0)
-            + 20.0;
+            + 20.0)
+            .min((crate::app::git::log::log_refresh_rect(header).x - 8.0 - x - 4.0).max(0.0));
         let rect = Rect::new(x + 4.0, y, w, pill_h);
         frame.rounded(rect, p.hover, RADIUS_ROW);
         ui_text_small(frame, app, rect.x + 10.0, rect, &text, p.text_muted, rect);
@@ -277,13 +294,7 @@ fn draw_header(
     }
 
     // 右端：刷新按钮（边长 24 逻辑像素，经验值）；左边是提交数。
-    let size = 24.0;
-    let refresh = Rect::new(
-        header.right() - 10.0 - size,
-        header.y + (header.h - size) / 2.0,
-        size,
-        size,
-    );
+    let refresh = crate::app::git::log::log_refresh_rect(header);
     let hovered = app.hover == Hover::Log(LogTarget::Refresh);
     draw_button(frame, p, refresh, header, hovered, false);
     icons::refresh(frame, center(refresh), p.text_muted, refresh);
@@ -306,7 +317,9 @@ fn draw_header(
     };
     let note_w = frame.measure(FontKind::Ui, app.fonts.ui_small, &note);
     let note_x = refresh.x - 10.0 - note_w;
-    ui_text_small(frame, app, note_x, header, &note, p.text_dim, header);
+    if note_x >= x + 8.0 {
+        ui_text_small(frame, app, note_x, header, &note, p.text_dim, header);
+    }
 
     // 筛过时在左侧画「清除筛选」，与右端的提交数之间放得下才画。
     if query.filtered() {

@@ -279,3 +279,9 @@ workspace-stdin-read-failed = 读取标准输入时出错：{ $error }
 workspace-stdin-truncated = 只读取了标准输入的前 { $size } MB
 workspace-backup-locked = 此目录已在另一个 winc 窗口中打开，本窗口未保存的修改将不会自动备份
 workspace-backup-failed = 无法备份未保存的修改：{ $error }
+
+workspace-sidebar-outline = 大纲
+workspace-outline-loading = 正在生成大纲…
+workspace-outline-paused = 切回窗口后更新
+workspace-outline-error = 生成失败，重新打开大纲以重试
+workspace-outline-partial = 部分结果（已达到扫描限制）

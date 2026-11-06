@@ -7,6 +7,8 @@
 //! 模块或标题是它的上级；直接位于类型或模块之下的函数记为方法。
 
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use regex::Regex;
 use ropey::Rope;
@@ -72,6 +74,57 @@ pub struct Symbol {
     pub col: usize,
     /// 上级符号的名字；没有上级时为 `None`。
     pub container: Option<String>,
+    /// 上级在同一索引中的下标，避免同名声明混淆。
+    pub parent: Option<usize>,
+    /// 近似层级（按缩进或标题层级推导）。
+    pub depth: usize,
+    /// 完整符号名的字符数；显示名称截短时跳转仍使用原始长度。
+    pub name_chars: usize,
+}
+
+/// 索引允许的最大输入字节数；创建快照前同样检查此值。
+pub const INDEX_INPUT_BYTES: usize = 16 << 20;
+/// 单份符号结果的估算字节预算。
+pub const INDEX_RESULT_BYTES: usize = 2 << 20;
+/// 单份索引最多保留的声明数。
+pub const INDEX_NODES: usize = 10_000;
+/// 扫描单行的字节预算，超出时停止以避免丢失跨行状态。
+const INDEX_LINE_BYTES: usize = 64 << 10;
+/// 显示名称的字节预算。
+const INDEX_NAME_BYTES: usize = 256;
+
+/// 受限符号扫描提前结束的原因。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanLimit {
+    /// 输入超过预算。
+    Input,
+    /// 遇到超长行。
+    Line,
+    /// 结果数量或内存达到预算。
+    Results,
+    /// 累计扫描时间达到预算。
+    Time,
+}
+
+/// 可由大纲和符号导航共享的只读结果。
+#[derive(Debug, Default)]
+pub struct SymbolIndex {
+    /// 按源文件顺序排列的符号。
+    pub items: Vec<Symbol>,
+    /// 不完整的原因；`None` 表示完整。
+    pub limit: Option<ScanLimit>,
+}
+
+impl std::ops::Deref for SymbolIndex {
+    type Target = [Symbol];
+    fn deref(&self) -> &Self::Target {
+        &self.items
+    }
+}
+
+/// 在后台扫描符号；取消时返回 `None`，资源不足时返回带原因的部分结果。
+pub fn scan_symbols(text: &Rope, language: &Language, cancel: &AtomicBool) -> Option<SymbolIndex> {
+    scan(text, language, Some(cancel))
 }
 
 /// 标识符的正则：字母、数字、下划线、`$`，不以数字开头。
@@ -149,7 +202,7 @@ static MAKE_TARGET: LazyLock<Regex> =
 
 /// Markdown 标题：行首的 `#` 到 `######` 加标题文字，末尾的 `#` 不属于标题。
 static HEADING: LazyLock<Regex> =
-    LazyLock::new(|| regex(r"^(?P<hashes>#{1,6})\s+(?P<name>.*?)\s*#*\s*$"));
+    LazyLock::new(|| regex(r"^ {0,3}(?P<hashes>#{1,6})(?:[\t ]+(?P<name>.*?)|$)[\t ]*$"));
 
 /// INI 风格的小节：`[名字]` 或 `[[名字]]`。
 static SECTION: LazyLock<Regex> = LazyLock::new(|| regex(r"^\s*\[\[?\s*(?P<name>[^\]]+?)\s*\]\]?"));
@@ -195,13 +248,43 @@ const NOT_NAMES: &[&str] = &[
 ///
 /// `language` 决定按哪种语言的写法识别。
 pub fn symbols(text: &Rope, language: &Language) -> Vec<Symbol> {
+    scan(text, language, None).unwrap_or_default().items
+}
+
+fn scan(text: &Rope, language: &Language, cancel: Option<&AtomicBool>) -> Option<SymbolIndex> {
+    let started = Instant::now();
+    let bounded = cancel.is_some();
+    let mut limit = None;
+    if bounded && text.len_bytes() > INDEX_INPUT_BYTES {
+        return Some(SymbolIndex {
+            items: Vec::new(),
+            limit: Some(ScanLimit::Input),
+        });
+    }
     let mut found = Vec::new();
     // 上级栈，元素为（层级，名字，种类）；层级是缩进列数或 Markdown 标题级别。
-    let mut parents: Vec<(usize, String, SymbolKind)> = Vec::new();
+    let mut parents: Vec<(usize, String, SymbolKind, usize)> = Vec::new();
     let mut skip = Skip::default();
     let mut line = String::new();
+    let mut bytes = 0usize;
+    let mut checkpoint_bytes = 0usize;
 
     for (i, slice) in text.lines().enumerate() {
+        if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+            return None;
+        }
+        if bounded && (i % 128 == 0 || checkpoint_bytes >= INDEX_LINE_BYTES) {
+            if started.elapsed() >= Duration::from_millis(100) {
+                limit = Some(ScanLimit::Time);
+                break;
+            }
+            checkpoint_bytes = 0;
+        }
+        if bounded && slice.len_bytes() > INDEX_LINE_BYTES {
+            limit = Some(ScanLimit::Line);
+            break;
+        }
+        checkpoint_bytes += slice.len_bytes();
         line.clear();
         line.extend(slice.chunks());
         let content = line.trim_end_matches(['\n', '\r']);
@@ -209,7 +292,7 @@ pub fn symbols(text: &Rope, language: &Language) -> Vec<Symbol> {
         if skip.line(content, language) {
             continue;
         }
-        let Some((name, kind, col, level, container)) = recognize(content, language) else {
+        let Some((mut name, kind, col, level, mut container)) = recognize(content, language) else {
             continue;
         };
 
@@ -218,14 +301,32 @@ pub fn symbols(text: &Rope, language: &Language) -> Vec<Symbol> {
         }
         let parent = parents.last();
         let kind = match (kind, parent) {
-            (SymbolKind::Function, Some((_, _, SymbolKind::Type | SymbolKind::Module))) => {
+            (SymbolKind::Function, Some((_, _, SymbolKind::Type | SymbolKind::Module, _))) => {
                 SymbolKind::Method
             }
             _ => kind,
         };
-        let container = container.or_else(|| parent.map(|(_, name, _)| name.clone()));
+        container = container.or_else(|| parent.map(|(_, name, _, _)| name.clone()));
+        let parent_index = parent.map(|(_, _, _, index)| *index);
+        let depth = parents.len();
+        let name_chars = name.chars().count();
+        if bounded {
+            truncate_name(&mut name);
+            if let Some(container) = &mut container {
+                truncate_name(container);
+            }
+            let cost = std::mem::size_of::<Symbol>() * 2
+                + name.capacity()
+                + container.as_ref().map_or(0, String::capacity)
+                + name.capacity();
+            if found.len() >= INDEX_NODES || bytes + cost > INDEX_RESULT_BYTES {
+                limit = Some(ScanLimit::Results);
+                break;
+            }
+            bytes += cost;
+        }
         if kind.contains() {
-            parents.push((level, name.clone(), kind));
+            parents.push((level, name.clone(), kind, found.len()));
         }
         found.push(Symbol {
             name,
@@ -233,9 +334,29 @@ pub fn symbols(text: &Rope, language: &Language) -> Vec<Symbol> {
             line: i,
             col,
             container,
+            parent: parent_index,
+            depth,
+            name_chars,
         });
     }
-    found
+    if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+        return None;
+    }
+    Some(SymbolIndex {
+        items: found,
+        limit,
+    })
+}
+
+fn truncate_name(name: &mut String) {
+    if name.len() > INDEX_NAME_BYTES {
+        let mut end = INDEX_NAME_BYTES;
+        while !name.is_char_boundary(end) {
+            end -= 1;
+        }
+        name.truncate(end);
+        name.shrink_to_fit();
+    }
 }
 
 /// 逐行跟踪注释和多行字符串的状态，用于跳过其中的行：块注释、Python 的三引号字符串、
@@ -247,7 +368,7 @@ struct Skip {
     /// 位于三引号字符串内。
     docstring: bool,
     /// 位于 Markdown 的围栏代码块内。
-    fence: bool,
+    fence: Option<(u8, usize)>,
 }
 
 impl Skip {
@@ -256,11 +377,28 @@ impl Skip {
         let trimmed = content.trim_start();
 
         if language.id == "markdown" {
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                self.fence = !self.fence;
+            let indent = content.len() - trimmed.len();
+            if indent <= 3 && !content.starts_with('\t') {
+                let marker = trimmed.as_bytes().first().copied().unwrap_or(0);
+                let count = trimmed.bytes().take_while(|b| *b == marker).count();
+                if let Some((open, length)) = self.fence {
+                    if marker == open && count >= length && trimmed[count..].trim().is_empty() {
+                        self.fence = None;
+                    }
+                    return true;
+                }
+                if matches!(marker, b'`' | b'~')
+                    && count >= 3
+                    && (marker != b'`' || !trimmed[count..].contains('`'))
+                {
+                    self.fence = Some((marker, count));
+                    return true;
+                }
+            }
+            if self.fence.is_some() {
                 return true;
             }
-            return self.fence;
+            return false;
         }
 
         // 只跟踪语言的第一种块注释写法，其余写法很少出现在符号所在的行附近。
@@ -312,7 +450,11 @@ fn recognize(
         "markdown" => {
             let caps = HEADING.captures(content)?;
             let level = caps["hashes"].len();
-            let (name, kind, col, _, _) = found(&caps, SymbolKind::Heading)?;
+            let (mut name, kind, col, _, _) = found(&caps, SymbolKind::Heading)?;
+            let trimmed = name.trim_end_matches('#');
+            if trimmed.len() < name.len() && trimmed.ends_with([' ', '\t']) {
+                name = trimmed.trim_end().to_owned();
+            }
             return (!name.is_empty()).then_some((name, kind, col, level, None));
         }
         "toml" | "ini" | "properties" => {

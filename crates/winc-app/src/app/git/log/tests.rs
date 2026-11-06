@@ -2,6 +2,29 @@
 
 use super::*;
 
+#[test]
+fn header_controls_leave_refresh_clickable_at_every_width() {
+    for width in [260.0, 360.0, 520.0, 760.0, 1280.0] {
+        let header = Rect::new(240.0, 50.0, width, 36.0);
+        let refresh = log_refresh_rect(header);
+        let filters = log_filter_rects(header, [400.0, 400.0]);
+        let hits = [
+            (log_search_rect(header), LogTarget::Search),
+            (filters[0], LogTarget::Branch),
+            (filters[1], LogTarget::Author),
+            (refresh, LogTarget::Refresh),
+        ];
+        for scale in [1.0, 1.5, 2.0] {
+            let physical = ((refresh.x + 12.0) * scale, (refresh.y + 12.0) * scale);
+            assert_eq!(
+                crate::layout::hit(&hits, physical.0 / scale, physical.1 / scale),
+                Some(LogTarget::Refresh)
+            );
+        }
+        assert!(filters.iter().all(|r| r.right() <= refresh.x));
+    }
+}
+
 /// 日志标签的标题，测试中与 [`log_title`] 在默认语言下的结果比较。
 #[cfg(unix)]
 pub(crate) const LOG_TITLE: &str = "Git 日志";

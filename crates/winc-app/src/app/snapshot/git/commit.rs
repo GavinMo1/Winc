@@ -266,7 +266,7 @@ fn commit_view_commits_only_the_checked_files() {
     // 默认显示为列表；本测试检查按目录排列的树形视图。
     app.commit.set_flat(false);
     // 模块关闭时：侧栏没有 Git 按钮，⌃⇧G 不响应。
-    assert_eq!(app.sidebar_views().len(), 2);
+    assert_eq!(app.sidebar_views().len(), 3);
     assert!(!app.run_action(Action::ShowCommit));
 
     app.settings_toggle(Setting::GitModule);

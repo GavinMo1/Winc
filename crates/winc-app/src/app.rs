@@ -113,6 +113,8 @@ use crate::view;
 /// 后台线程和系统回调（面板、菜单、提示框）送回事件循环的事件。
 #[derive(Debug)]
 pub enum UserEvent {
+    /// 全局符号任务结束，由 Winc 先回收运行槽位。
+    SymbolsReady,
     /// 打开或另存为面板已关闭；取消时路径为 `None`。
     Picked(Pick, Option<PathBuf>),
     /// 全局搜索产生了新结果，或已搜索完成。
@@ -373,6 +375,8 @@ pub enum Hover {
     MarkdownLink(usize),
     Search(SearchButton),
     TreeRow(usize),
+    /// 当前文件大纲中的符号行。
+    Outline(usize),
     /// 标签序号，以及是否悬停在该标签的关闭按钮上。
     Tab(usize, bool),
     Splitter,
@@ -913,6 +917,8 @@ pub struct App {
     pub recent_commands: Vec<crate::keymap::Action>,
     /// 在快速打开中输入 `@` 时列出的当前文件的符号。
     pub picker_symbols: Option<editor::symbols::SymbolList>,
+    /// 当前文档的共享符号索引及大纲视图状态。
+    pub(crate) symbols: editor::symbols::SymbolState,
     /// 两段组合键（如 `⌘K ⌘S`）的第一段，正在等待第二段。
     pub(crate) pending_chord: Option<crate::keymap::Stroke>,
     /// 「后退」「前进」使用的位置历史。

@@ -32,6 +32,15 @@ pub(in crate::view) fn draw_sidebar(app: &mut App, frame: &mut Frame<'_>) {
     frame.rect(app.layout.sidebar, app.palette.sidebar_bg);
     panel::draw_view_tabs(app, frame);
 
+    if app.sidebar_view == SidebarView::Outline {
+        app.tree_tools.clear();
+        app.tree_more = None;
+        app.project_hit = Rect::default();
+        app.tree_overflow = None;
+        outline::draw_outline(app, frame);
+        return;
+    }
+
     if app.sidebar_view == SidebarView::Search {
         let right = app.panel_parts().tools[0].0.x - 4.0;
         let bar = ContextBar::new(app, frame);

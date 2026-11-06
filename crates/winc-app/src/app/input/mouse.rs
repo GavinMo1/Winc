@@ -227,6 +227,8 @@ impl App {
             let max = self.commit_max_scroll();
             self.commit.scroll = (self.commit.scroll - dy).clamp(0.0, max);
             self.set_hover(self.hover_at(x, y));
+        } else if self.sidebar_view == SidebarView::Outline && l.sidebar.contains(x, y) {
+            self.symbols.scroll = (self.symbols.scroll - dy).max(0.0);
         } else if self.panel_shown() && l.sidebar.contains(x, y) {
             let max = self.results_max_scroll();
             self.global.scroll = (self.global.scroll - dy).clamp(0.0, max);

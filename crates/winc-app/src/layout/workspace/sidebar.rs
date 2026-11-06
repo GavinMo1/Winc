@@ -131,6 +131,8 @@ pub enum SidebarView {
     Files,
     /// 全局搜索面板。
     Search,
+    /// 当前文件的符号与 Markdown 章节大纲。
+    Outline,
     /// Git 的提交视图：改动列表、提交信息。
     ///
     /// 只在 Git 模块开着、目录在仓库里时有。
@@ -145,6 +147,7 @@ impl SidebarView {
             SidebarView::Search => {
                 with_key(t!("workspace-sidebar-search"), Some(Action::FindInFiles))
             }
+            SidebarView::Outline => t!("workspace-sidebar-outline").to_owned(),
             SidebarView::Commit => {
                 with_key(t!("workspace-sidebar-commit"), Some(Action::ShowCommit))
             }
@@ -167,7 +170,11 @@ pub fn set_traffic_lights_end(end: f32) -> bool {
 }
 
 /// 总是有的两个侧栏视图。
-pub const BASE_VIEWS: [SidebarView; 2] = [SidebarView::Files, SidebarView::Search];
+pub const BASE_VIEWS: [SidebarView; 3] = [
+    SidebarView::Files,
+    SidebarView::Search,
+    SidebarView::Outline,
+];
 
 /// 返回红绿灯右侧第一个按钮的左边缘：侧栏收起时是侧栏开关，展开时是侧栏顶部的「文件」切换。
 ///

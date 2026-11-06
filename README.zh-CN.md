@@ -74,6 +74,9 @@ cargo run --release -- <路径>        # 打开文件或目录
 
 ## 开发
 
+Windows 环境准备（以 Scoop 为主）、双电脑协作及同步原作者修改，见
+[Windows 开发指南](DEVELOPMENT.zh-CN.md)。
+
 ```bash
 cargo xtask test                    # 只测和 HEAD 相比改动涉及的 crate
 cargo xtask test --all              # 测整个 workspace

@@ -421,6 +421,7 @@ impl App {
         self.focus = match self.sidebar_view {
             SidebarView::Files => Focus::Tree,
             SidebarView::Search => Focus::GlobalQuery,
+            SidebarView::Outline => Focus::Editor,
             SidebarView::Commit => Focus::CommitMessage,
         };
     }

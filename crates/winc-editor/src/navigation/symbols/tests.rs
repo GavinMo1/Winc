@@ -2,6 +2,64 @@
 
 use super::*;
 
+#[test]
+fn bounded_scan_tracks_parent_identity_and_markdown_fences() {
+    let cancel = AtomicBool::new(false);
+    let text = Rope::from_str(
+        "# Same\n## Child\n# Same\n## Other\n````md\n```\n# Hidden\n````\n   # Visible\n# C#\n",
+    );
+    let index = scan_symbols(&text, winc_syntax::detect("x.md"), &cancel).unwrap();
+    assert_eq!(
+        index.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+        ["Same", "Child", "Same", "Other", "Visible", "C#"]
+    );
+    assert_eq!(index[1].parent, Some(0));
+    assert_eq!(index[3].parent, Some(2));
+    assert_eq!(index[4].parent, None);
+    assert_eq!(index.limit, None);
+}
+
+#[test]
+fn bounded_scan_rejects_large_ropes_and_stops_before_overlong_lines() {
+    let cancel = AtomicBool::new(false);
+    let mut text = Rope::from_str("fn first() {}\n");
+    text.append(Rope::from_str(&"x".repeat(INDEX_LINE_BYTES + 1)));
+    let index = scan_symbols(&text, winc_syntax::detect("x.rs"), &cancel).unwrap();
+    assert_eq!(index.limit, Some(ScanLimit::Line));
+    assert_eq!(index[0].name, "first");
+    let large = Rope::from_str(&"x".repeat(INDEX_INPUT_BYTES + 1));
+    assert_eq!(
+        scan_symbols(&large, winc_syntax::detect("x.rs"), &cancel)
+            .unwrap()
+            .limit,
+        Some(ScanLimit::Input)
+    );
+    cancel.store(true, Ordering::Relaxed);
+    assert!(scan_symbols(&text, winc_syntax::detect("x.rs"), &cancel).is_none());
+}
+
+#[test]
+fn bounded_scan_truncates_display_names_at_utf8_boundaries_and_caps_results() {
+    let cancel = AtomicBool::new(false);
+    let name = "名".repeat(200);
+    let text = Rope::from_str(&format!("fn {name}() {{}}\n"));
+    let index = scan_symbols(&text, winc_syntax::detect("x.rs"), &cancel).unwrap();
+    assert_eq!(index[0].name_chars, 200);
+    assert!(index[0].name.len() <= INDEX_NAME_BYTES);
+    assert!(name.starts_with(&index[0].name));
+    let dense: String = (0..15_000)
+        .map(|i| format!("fn item_{i}() {{}}\n"))
+        .collect();
+    let index = scan_symbols(
+        &Rope::from_str(&dense),
+        winc_syntax::detect("x.rs"),
+        &cancel,
+    )
+    .unwrap();
+    assert!(index.len() <= INDEX_NODES);
+    assert!(index.limit.is_some());
+}
+
 fn outline(language: &str, text: &str) -> Vec<(String, &'static str, Option<String>)> {
     let language = winc_syntax::detect(&format!("x.{language}"));
     symbols(&Rope::from_str(text), language)

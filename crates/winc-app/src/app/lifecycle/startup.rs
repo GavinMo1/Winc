@@ -43,7 +43,12 @@ impl App {
             x_height: 6.5,
             cap_height: 9.0,
         };
-        let panel_visible = editor.workspace.is_some();
+        let panel_visible = editor.workspace.is_some() || config.outline_visible == Some(true);
+        let initial_sidebar = if config.outline_visible == Some(true) {
+            SidebarView::Outline
+        } else {
+            SidebarView::Files
+        };
         // 主题以配置为准；配置中没有时参考环境变量 `WINC_THEME`（见 `forced_theme`）。
         let theme_choice = config.theme.unwrap_or(ThemeChoice::Auto);
 
@@ -126,7 +131,7 @@ impl App {
             alert_card: Default::default(),
             picker_motion: None,
             picker_fold: None,
-            sidebar_view: SidebarView::Files,
+            sidebar_view: initial_sidebar,
             view_slide: None,
             module_fx: Default::default(),
             status_motion: StatusMotion::default(),
@@ -187,6 +192,7 @@ impl App {
             navigation: Default::default(),
             pending_chord: None,
             picker_symbols: None,
+            symbols: Default::default(),
             picker_places: None,
             picker_branch_rows: None,
             picker_location_rows: None,

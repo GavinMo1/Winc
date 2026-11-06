@@ -17,6 +17,8 @@ use winc_i18n::{LocaleChoice, t};
 /// 每一项都是可选的，`None`（集合类型为空）表示用户没写过，使用默认值。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Config {
+    /// 是否在侧栏显示当前文件大纲，默认关闭。
+    pub outline_visible: Option<bool>,
     /// 编辑区等宽字体，可以是字体名（如 `Menlo`），也可以是字体文件路径。
     pub editor_font: Option<String>,
     /// 编辑区字号（点）。

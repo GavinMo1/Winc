@@ -162,6 +162,7 @@ const EDITOR: &[Field] = &[
 
 /// `ui` 一节。
 const UI: &[Field] = &[
+    bool_field!("outline", outline_visible),
     string_field!("font", ui_font),
     Field {
         key: "size",

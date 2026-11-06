@@ -582,6 +582,13 @@ fn draw_symbol_rows(app: &App, frame: &mut Frame<'_>, parts: &PickerParts) {
     let empty = match &app.picker_symbols {
         None => Some(t!("workspace-no-open-file")),
         Some(s) if s.too_large => Some(t!("workspace-picker-symbols-too-large")),
+        Some(_) if app.symbols.error => Some(t!("workspace-outline-error")),
+        Some(_) if app.symbols.waiting || app.symbols.index.is_none() => {
+            Some(t!("workspace-outline-loading"))
+        }
+        Some(s) if s.items.is_empty() && s.items.limit.is_some() => {
+            Some(t!("workspace-outline-partial"))
+        }
         Some(s) if s.items.is_empty() => Some(t!("workspace-picker-no-symbols")),
         Some(_) if app.picker_hits.is_empty() => Some(t!("workspace-picker-no-matching-symbols")),
         Some(_) => None,

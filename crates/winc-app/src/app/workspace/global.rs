@@ -432,6 +432,10 @@ impl App {
         }
 
         let from = std::mem::replace(&mut self.sidebar_view, view);
+        if from == SidebarView::Outline || view == SidebarView::Outline {
+            self.config.outline_visible = Some(view == SidebarView::Outline);
+            self.save_config();
+        }
         self.view_slide = self
             .clock(crate::app::animation::VIEW_SLIDE)
             .map(|clock| (from, clock));

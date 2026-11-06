@@ -19,6 +19,15 @@ impl App {
             return Some(Hover::ProjectName);
         }
 
+        if self.sidebar_view == SidebarView::Outline && y >= self.layout.sidebar_header.y {
+            if self.panel_visible && self.layout.splitter.contains(x, y) {
+                return None;
+            }
+            return Some(
+                hit(&self.symbols.hits, x, y).map_or(Hover::None, |(item, _)| Hover::Outline(item)),
+            );
+        }
+
         // 提交视图：输入框之外按绘制时记下的位置找。
         if self.commit_shown() && y >= self.panel_rect().y {
             // 分隔条由分隔条自己认（`Target::Splitter`）。
@@ -206,6 +215,7 @@ impl App {
             match view {
                 SidebarView::Files => self.show_files(),
                 SidebarView::Search => self.open_global_search(false),
+                SidebarView::Outline => self.show_outline(),
                 SidebarView::Commit => self.show_commit(),
             }
 
@@ -213,6 +223,16 @@ impl App {
         }
         if self.project_hit.contains(x, y) {
             self.open_project_menu();
+            return true;
+        }
+
+        if self.sidebar_view == SidebarView::Outline
+            && self.panel_visible
+            && !self.layout.splitter.contains(x, y)
+        {
+            if let Some((item, fold)) = hit(&self.symbols.hits, x, y) {
+                self.click_outline(item, fold);
+            }
             return true;
         }
 

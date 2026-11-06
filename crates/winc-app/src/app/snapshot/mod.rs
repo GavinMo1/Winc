@@ -21,9 +21,11 @@ mod animation;
 mod editor;
 #[cfg(unix)]
 mod git;
+mod git_refresh;
 mod input;
 #[cfg(target_os = "macos")]
 mod memory;
+mod outline;
 mod preview;
 mod settings;
 mod shots;
@@ -142,6 +144,14 @@ pub(super) fn paint(app: &mut App) {
     app.hover = app.hover_at(app.mouse.0, app.mouse.1);
     renderer.draw(|frame| view::draw(app, frame));
     app.renderer = Some(renderer);
+}
+
+/// 在没有原生事件循环的交互测试中驱动真实的进程级符号任务。
+fn settle_symbols(app: &mut App) {
+    let mut winc = crate::winc::Winc::new(None, None);
+    let key = winc.add_detached(std::mem::replace(app, blank_app(false)));
+    winc.symbols_for_test();
+    *app = winc.take_app(key);
 }
 
 /// 直接删除 `path`（文件或目录），不移入废纸篓，避免测试在用户的废纸篓中留下内容。

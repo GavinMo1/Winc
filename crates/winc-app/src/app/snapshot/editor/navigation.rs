@@ -384,6 +384,7 @@ fn go_to_symbol_previews_filters_and_jumps() {
     caret_on(&mut app, "pass", 0);
 
     app.open_symbols();
+    settle_symbols(&mut app);
     assert!(app.picker_open && app.picker_lists_symbols());
     assert_eq!(app.picker_input.text(), "@");
     let names = symbol_names(&app);
@@ -408,6 +409,7 @@ fn go_to_symbol_previews_filters_and_jumps() {
 
     // 在快速打开中手动输入 `@` 同样进入符号列表；回车跳转并选中名字。
     app.open_symbols();
+    settle_symbols(&mut app);
     app.picker_input.set_text("@main");
     app.picker_refresh();
     app.picker_accept();
@@ -421,6 +423,7 @@ fn go_to_symbol_previews_filters_and_jumps() {
     app.select(0, 0);
     app.editor.active_mut().unwrap().scroll_line = 0.0;
     app.open_symbols();
+    settle_symbols(&mut app);
     app.picker_input.set_text("@ren");
     app.picker_refresh();
     app.picker_input.set_text("ren");
@@ -952,6 +955,7 @@ fn switching_tabs_closes_lists_that_belong_to_the_old_file() {
 
     // 符号列表属于 `shop.py`：切到另一个标签后关闭，回车不会在 `other.py` 中跳到 `shop.py` 的行号。
     app.open_symbols();
+    settle_symbols(&mut app);
     assert!(app.picker_open);
     app.activate_tab(1);
     assert!(!app.picker_open);
@@ -959,6 +963,7 @@ fn switching_tabs_closes_lists_that_belong_to_the_old_file() {
 
     // 自己打开文件的那些操作（⌘P 选中文件）仍然生效：先关面板再换标签。
     app.open_symbols();
+    settle_symbols(&mut app);
     app.picker_accept();
     assert!(!app.picker_open);
 }

@@ -526,6 +526,7 @@ impl App {
         } else if matches!(
             self.hover,
             Hover::Log(crate::app::git::log::LogTarget::Line(..))
+                | Hover::Outline(_)
                 | Hover::TerminalBlock(_)
                 | Hover::MarkdownLink(_)
         ) || self.terminal.link.is_some()

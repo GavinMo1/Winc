@@ -25,6 +25,8 @@ use crate::bench::Bench;
 use crate::cli::Target;
 use crate::instance::{AppLock, Listener};
 
+mod symbols;
+
 /// 窗口在本进程里的编号：建 [`App`] 时就定下（那时系统窗口还没建，没有 [`WindowId`]），
 /// 后台任务送回的事件靠它找回自己的窗口。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -227,6 +229,7 @@ struct Asking {
 
 /// 整个应用：所有窗口，和当前是哪个（最近获得焦点或按下鼠标的）。
 pub struct Winc {
+    symbols: crate::symbol_jobs::SymbolJobs,
     /// 事件循环的代理；测试中没有事件循环，为 `None`。
     proxy: Option<EventLoopProxy<Envelope>>,
     /// 所有窗口，以及本层为它们记下的东西。
@@ -251,6 +254,7 @@ impl Winc {
     /// 窗口用的（没有时不能新建窗口）。
     pub fn new(proxy: Option<EventLoopProxy<Envelope>>, template: Option<Template>) -> Winc {
         Winc {
+            symbols: Default::default(),
             proxy,
             windows: Vec::new(),
             active: None,
@@ -544,6 +548,7 @@ impl Winc {
                 return;
             }
             if requests.is_empty() {
+                self.sync_symbols();
                 return;
             }
             for request in requests {
@@ -754,8 +759,10 @@ impl Winc {
 
     /// 各窗口下一次要醒来的时刻里最早的一个。
     fn next_wake(&mut self) -> Option<Instant> {
+        let symbols = self.sync_symbols();
         let wakes = self.windows.iter_mut().filter_map(|slot| slot.app.tick());
-        wakes.min()
+        let wake = wakes.min();
+        wake.into_iter().chain(symbols).min()
     }
 }
 
@@ -769,6 +776,7 @@ impl ApplicationHandler<Envelope> for Winc {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, envelope: Envelope) {
         match envelope.event {
+            UserEvent::SymbolsReady => {}
             UserEvent::Launched(targets, answer) => self.launched(event_loop, targets, answer),
             UserEvent::Opened(paths) => self.opened(event_loop, &paths),
             UserEvent::UpdateFound(version) => {

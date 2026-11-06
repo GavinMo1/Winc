@@ -109,6 +109,39 @@ pub(crate) fn log_parts(editor: Rect, details_w: Option<f32>) -> LogParts {
     }
 }
 
+/// 日志标题栏的刷新按钮；左侧控件必须为它保留空间。
+pub(crate) fn log_refresh_rect(header: Rect) -> Rect {
+    Rect::new(
+        header.right() - 34.0,
+        header.y + (header.h - 24.0) / 2.0,
+        24.0,
+        24.0,
+    )
+}
+
+/// 日志搜索框；窄窗口里缩小，为筛选入口与刷新按钮留出空间。
+pub(crate) fn log_search_rect(header: Rect) -> Rect {
+    Rect::new(
+        header.x + 12.0,
+        header.y + 6.0,
+        ((header.w - 70.0) * 0.4).clamp(0.0, 220.0),
+        (header.h - 12.0).max(0.0),
+    )
+}
+
+/// 按可用宽度分配两个筛选入口，绘制和点击共用矩形。
+pub(crate) fn log_filter_rects(header: Rect, widths: [f32; 2]) -> [Rect; 2] {
+    let search = log_search_rect(header);
+    let left = search.right() + 8.0;
+    let room = (log_refresh_rect(header).x - 8.0 - left - 4.0).max(0.0);
+    let first = widths[0].clamp(0.0, room * 0.5);
+    let second = widths[1].clamp(0.0, room - first);
+    [
+        Rect::new(left, search.y, first, search.h),
+        Rect::new(left + first + 4.0, search.y, second, search.h),
+    ]
+}
+
 /// 日志标签里可以点的地方。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogTarget {

@@ -4,6 +4,28 @@
 use super::*;
 
 impl Winc {
+    /// 测试用：只推进一轮，不等待正在运行的扫描。
+    pub(crate) fn symbols_tick_for_test(&mut self) {
+        self.sync_symbols();
+    }
+    /// 测试用：等待真实后台符号任务完成（不在 UI 上同步扫描）。
+    pub(crate) fn symbols_for_test(&mut self) {
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let wake = self.sync_symbols();
+            if !self.symbols.busy() && wake.is_none() {
+                return;
+            }
+            assert!(Instant::now() < deadline, "符号任务未完成");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// 测试用：取回一个窗口，以便 App 级交互测试复用进程级后台调度。
+    pub(crate) fn take_app(&mut self, key: WindowKey) -> App {
+        let at = self.windows.iter().position(|s| s.key == key).unwrap();
+        self.windows.remove(at).app
+    }
     /// 加入一个窗口，返回分到的编号（测试没有事件循环，用不到代理）。
     pub(crate) fn add_detached(&mut self, app: App) -> WindowKey {
         let (key, _) = self.reserve();

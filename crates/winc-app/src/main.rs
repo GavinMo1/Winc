@@ -24,6 +24,7 @@ mod layout;
 mod macos;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod portal;
+mod symbol_jobs;
 mod system;
 mod theme;
 #[cfg(all(unix, not(target_os = "macos")))]

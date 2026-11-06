@@ -348,6 +348,7 @@ fn snapshot_palette_and_definitions() {
         let shop = super::editor::navigation::long_python(&dir);
         app.open_path(&shop);
         app.open_symbols();
+        settle_symbols(&mut app);
         app.picker_move(true);
         shoot(&mut app, &format!("symbols-{tag}"));
         app.close_picker();

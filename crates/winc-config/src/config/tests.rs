@@ -194,6 +194,7 @@ fn malformed_json_does_not_panic() {
 #[test]
 fn round_trips_through_json() {
     let config = Config {
+        outline_visible: Some(true),
         editor_font: Some("Menlo".to_string()),
         editor_size: Some(14.0),
         ui_font: Some("「带引号」的字体".to_string()),
